@@ -52,6 +52,9 @@ namespace ModRotation
     bool   KeepAuraOn(Player* p, Unit* target, uint32 firstRankId); // (re)applique notre aura si absente
     bool   KeepSelfBuff(Player* p, uint32 firstRankId);             // buff personnel si absent
     bool   IsBleedImmune(Unit* target);
+    // Ennemi hors combat à moins de `radius` m de soi (hors `except`) : une
+    // AoE centrée sur soi (Météores…) le pullerait.
+    bool   AnyIdleEnemyNear(Player* p, float radius, Unit* except);
     void   EngageMelee(Ctx& c);
     void   EngageRanged(Ctx& c);
     void   PetAttack(Ctx& c);

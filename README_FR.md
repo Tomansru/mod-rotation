@@ -102,7 +102,7 @@ Connexion automatique si mana < 20 % ; familier engagé ; [AoE : Graine de corru
 - **Destruction** : Immolation → Conflagration → Trait du chaos → Malédiction d'apocalypse → Incinérer
 
 ### Druide
-- **Equilibre** : Forme de sélénien → Lucioles → Essaim d'insectes → Feu lunaire → [AoE : Pluie d'étoiles, Ouragan] → Feu stellaire (Eclipse lunaire) / Colère
+- **Equilibre** : Forme de sélénien → Lucioles (seulement avec Lucioles améliorées ou en groupe, et si aucune Lucioles n'est déjà posée) → Météores à chaque recharge (cible à moins de 30 m et aucun ennemi paisible alentour à puller) → [3+ ennemis : Ouragan] → Essaim d'insectes → Feu lunaire (DoT non rafraîchis pendant une Eclipse) → cycle d'Eclipse : Feu stellaire pendant l'Eclipse lunaire, Colère pendant l'Eclipse solaire ; hors Eclipse, on « pêche » celle dont la recharge interne de 30 s finit en premier (Colère déclenche la lunaire, Feu stellaire la solaire — après une lunaire on reste donc sur Feu stellaire jusqu'à la solaire, et inversement). En mouvement : DoT, puis Feu lunaire en remplisseur instantané.
 - **Farouche** : suit la forme actuelle. **Ours** (tank) : Mutiler → Lucioles (farouche) → Lacérer x5 → [AoE : Balayage] → Mutilation. **Félin** : Fureur du tigre (énergie basse) → Rugissement sauvage → Déchirure (5 pts) → Griffure → Mutiler → Lambeau (repli Mutiler/Griffe)
 - **Restauration** : Récupération / Croissance sauvage / Rétablissement / Prompte guérison / Nourrir selon la gravité
 

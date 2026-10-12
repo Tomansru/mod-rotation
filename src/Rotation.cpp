@@ -142,6 +142,22 @@ void EngageRanged(Ctx& c)
         c.me->CastSpell(c.target, 75, false);
 }
 
+bool AnyIdleEnemyNear(Player* p, float radius, Unit* except)
+{
+    typedef Acore::UnitListSearcher<Acore::AnyUnfriendlyUnitInObjectRangeCheck> Searcher;
+
+    std::list<Unit*> units;
+    Acore::AnyUnfriendlyUnitInObjectRangeCheck check(p, p, radius);
+    Searcher searcher(p, units, check);
+    Cell::VisitObjects(p, searcher, radius);
+
+    for (Unit* u : units)
+        if (u != except && !u->IsInCombat() && p->IsValidAttackTarget(u))
+            return true;
+
+    return false;
+}
+
 // Compte les ennemis en combat autour de la cible. C'est ce qui décide de
 // l'AoE pour toutes les spécialisations.
 //

@@ -5,6 +5,7 @@
  */
 
 #include "Rotation.h"
+#include "GameTime.h"
 #include "SpellAuras.h"
 
 namespace ModRotation
@@ -43,39 +44,135 @@ namespace
     constexpr uint32 HEALING_TOUCH  = 5185;
     constexpr uint32 SWIFTMEND      = 18562;
 
-    constexpr uint32 AURA_ECLIPSE_LUNAR = 48518;
-    constexpr uint32 AURA_ECLIPSE_SOLAR = 48517;
+    constexpr uint32 AURA_ECLIPSE_LUNAR = 48518; // Feu stellaire +40 % critique
+    constexpr uint32 AURA_ECLIPSE_SOLAR = 48517; // Colère +40 % dégâts
+
+    constexpr uint32 ECLIPSE_TALENT       = 48516;
+    constexpr uint32 IMPROVED_FAERIE_FIRE = 33600;
+    constexpr uint32 ECLIPSE_ICD_MS       = 30000;
+    constexpr float  STARFALL_RADIUS      = 30.0f;
+
+    // Le talent Eclipse a un temps de recharge interne de 30 s par type
+    // d'Eclipse, gardé privé par le script du cœur (spell_dru_eclipse) : on le
+    // reconstitue à partir des auras observées à chaque appui.
+    struct EclipseState : public DataMap::Base
+    {
+        uint32 lunarProc = 0; // GameTime en ms du dernier déclenchement
+        uint32 solarProc = 0;
+        bool   lunarSeen = false;
+        bool   solarSeen = false;
+    };
+
+    void RecordEclipse(Player* me, uint32 auraId, uint32 now, uint32& procTime, bool& seen)
+    {
+        if (Aura* aura = me->GetAura(auraId))
+        {
+            procTime = now - uint32(aura->GetMaxDuration() - aura->GetDuration());
+            seen = true;
+        }
+    }
+
+    uint32 EclipseCooldownLeft(uint32 procTime, bool seen, uint32 now)
+    {
+        if (!seen)
+            return 0;
+
+        uint32 elapsed = now - procTime;
+        return elapsed < ECLIPSE_ICD_MS ? ECLIPSE_ICD_MS - elapsed : 0;
+    }
+
+    // Choix du sort principal selon le cycle d'Eclipse :
+    //  - Eclipse lunaire  → Feu stellaire (+40 % de critique)
+    //  - Eclipse solaire  → Colère (+40 % de dégâts)
+    //  - hors Eclipse : on « pêche » celle dont le temps de recharge interne
+    //    finit le plus tôt — Colère déclenche la lunaire, Feu stellaire la
+    //    solaire. Après une lunaire on reste donc sur Feu stellaire jusqu'à
+    //    la solaire, et inversement.
+    uint32 PickNuke(Player* me)
+    {
+        if (!me->GetAuraOfRankedSpell(ECLIPSE_TALENT) || !MaxRank(me, STARFIRE))
+            return WRATH;
+
+        if (me->HasAura(AURA_ECLIPSE_LUNAR))
+            return STARFIRE;
+        if (me->HasAura(AURA_ECLIPSE_SOLAR))
+            return WRATH;
+
+        EclipseState* state = me->CustomData.GetDefault<EclipseState>("mod_rotation_eclipse");
+        uint32 now = GameTime::GetGameTimeMS().count();
+
+        uint32 lunarIn = EclipseCooldownLeft(state->lunarProc, state->lunarSeen, now);
+        uint32 solarIn = EclipseCooldownLeft(state->solarProc, state->solarSeen, now);
+
+        return solarIn < lunarIn ? STARFIRE : WRATH;
+    }
 
     void Balance(Ctx& c)
     {
+        Player* me = c.me;
+
         // Forme de sélénien si connue
-        if (c.me->HasSpell(MOONKIN_FORM) && c.me->GetShapeshiftForm() != FORM_MOONKIN
-            && TryCast(c.me, c.me, MOONKIN_FORM))
+        if (me->HasSpell(MOONKIN_FORM) && me->GetShapeshiftForm() != FORM_MOONKIN
+            && TryCast(me, me, MOONKIN_FORM))
             return;
+
+        // Mémorise les Eclipses en cours, même sans cible.
+        if (me->GetAuraOfRankedSpell(ECLIPSE_TALENT))
+        {
+            EclipseState* state = me->CustomData.GetDefault<EclipseState>("mod_rotation_eclipse");
+            uint32 now = GameTime::GetGameTimeMS().count();
+            RecordEclipse(me, AURA_ECLIPSE_LUNAR, now, state->lunarProc, state->lunarSeen);
+            RecordEclipse(me, AURA_ECLIPSE_SOLAR, now, state->solarProc, state->solarSeen);
+        }
 
         if (!c.target)
             return;
 
-        // Lucioles > Essaim d'insectes > Feu lunaire entretenus
-        if (KeepAuraOn(c.me, c.target, FAERIE_FIRE)) return;
-        if (KeepAuraOn(c.me, c.target, INSECT_SWARM)) return;
-        if (KeepAuraOn(c.me, c.target, MOONFIRE)) return;
+        bool moving    = me->isMoving();
+        bool inEclipse = me->HasAura(AURA_ECLIPSE_LUNAR) || me->HasAura(AURA_ECLIPSE_SOLAR);
 
-        if (c.Aoe())
+        // Lucioles : seulement si elles rapportent quelque chose au druide
+        // (Lucioles améliorées : +3 % de toucher/critique des sorts) ou au
+        // groupe (armure). N'importe quelle Lucioles déjà posée suffit.
+        if ((me->GetAuraOfRankedSpell(IMPROVED_FAERIE_FIRE) || me->GetGroup())
+            && !c.target->GetAuraOfRankedSpell(FAERIE_FIRE)
+            && !c.target->GetAuraOfRankedSpell(FAERIE_FIRE_FERAL)
+            && TryCastRank(me, c.target, FAERIE_FIRE))
+            return;
+
+        // Météores à chaque recharge, si la cible est à portée des étoiles et
+        // qu'aucun ennemi paisible alentour ne risque d'être pullé.
+        if (me->IsWithinDistInMap(c.target, STARFALL_RADIUS)
+            && !AnyIdleEnemyNear(me, STARFALL_RADIUS, c.target)
+            && TryCast(me, me, MaxRank(me, STARFALL)))
+            return;
+
+        // Ouragan à partir de 3 cibles (canalisé : impossible en mouvement)
+        if (!moving && c.enemies >= std::max<uint32>(config.AoeThreshold, 3)
+            && TryCastAt(me, c.target, HURRICANE))
+            return;
+
+        // DoT : on ne les rafraîchit pas pendant une Eclipse (chaque GCD doit
+        // profiter du bonus), sauf en mouvement où ce sont les seuls sorts
+        // instantanés disponibles.
+        if (!inEclipse || moving)
         {
-            if (TryCast(c.me, c.me, MaxRank(c.me, STARFALL))) return;
-            if (TryCastAt(c.me, c.target, HURRICANE)) return;
+            if (KeepAuraOn(me, c.target, INSECT_SWARM)) return;
+            if (KeepAuraOn(me, c.target, MOONFIRE)) return;
         }
 
-        // Eclipse : lunaire → Feu stellaire, solaire → Colère
-        if (c.me->HasAura(AURA_ECLIPSE_LUNAR) && TryCastRank(c.me, c.target, STARFIRE))
+        // En mouvement : Feu lunaire en remplisseur instantané
+        if (moving)
+        {
+            TryCastRank(me, c.target, MOONFIRE);
             return;
-        if (c.me->HasAura(AURA_ECLIPSE_SOLAR) && TryCastRank(c.me, c.target, WRATH))
-            return;
+        }
 
-        // Remplisseur : Colère (repli Feu stellaire)
-        if (TryCastRank(c.me, c.target, WRATH)) return;
-        TryCastRank(c.me, c.target, STARFIRE);
+        uint32 nuke = PickNuke(me);
+        if (TryCastRank(me, c.target, nuke)) return;
+
+        // Repli (sort pas encore appris, etc.)
+        TryCastRank(me, c.target, nuke == WRATH ? STARFIRE : WRATH);
     }
 
     void FeralBear(Ctx& c)

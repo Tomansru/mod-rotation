@@ -108,7 +108,7 @@ Life Tap when mana < 20%; pet engaged; [AoE: Seed of Corruption]; then:
 - **Destruction**: Immolate → Conflagrate → Chaos Bolt → Curse of Doom → Incinerate
 
 ### Druid
-- **Balance**: Moonkin Form → Faerie Fire → Insect Swarm → Moonfire → [AoE: Starfall, Hurricane] → Starfire (Lunar Eclipse) / Wrath
+- **Balance**: Moonkin Form → Faerie Fire (only with Improved Faerie Fire or in a group, and if no Faerie Fire is already up) → Starfall on cooldown (target within 30 yd and no idle enemy around that it would pull) → [3+ enemies: Hurricane] → Insect Swarm → Moonfire (DoTs are not refreshed during an Eclipse) → Eclipse cycle: Starfire during Lunar Eclipse, Wrath during Solar Eclipse; outside an Eclipse, fish for the one whose 30 s internal cooldown ends first (Wrath procs Lunar, Starfire procs Solar — so after a Lunar you keep casting Starfire until Solar, and vice versa). While moving: DoTs, then Moonfire as an instant filler.
 - **Feral**: follows your current form. **Bear** (tank): Mangle → Faerie Fire (Feral) → Lacerate x5 → [AoE: Swipe] → Maul. **Cat**: Tiger's Fury (low energy) → Savage Roar → Rip (5 cp) → Rake → Mangle → Shred (fallback Mangle/Claw)
 - **Restoration**: Rejuvenation / Wild Growth / Regrowth / Swiftmend / Nourish by severity
 
