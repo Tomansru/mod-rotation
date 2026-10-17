@@ -8,7 +8,8 @@ barre d'action. **1 appui = 1 action** — chaque pression lance l'aptitude la
 plus prioritaire actuellement disponible.
 
 **Toutes les classes et les 30 spécialisations** sont couvertes. La
-spécialisation est détectée automatiquement (arbre de talents dominant), les
+spécialisation est détectée automatiquement (arbre de talents dominant) ou
+choisie avec `.rotation spec` (voir plus bas), les
 rotations suivent les guides Wowhead WotLK Classic, et le module résout le
 **rang maximum connu** de chaque sort : il fonctionne à tous les niveaux.
 
@@ -114,7 +115,21 @@ Connexion automatique si mana < 20 % ; familier engagé ; [AoE : Graine de corru
 3. (Optionnel) Personnaliser `configs/modules/mod_rotation.conf` ; rechargeable
    en jeu avec `.reload config`.
 
-Aucun SQL n'est nécessaire.
+Le seul fichier SQL (`data/sql/db-world/base/mod_rotation_command.sql`, texte
+d'aide de `.rotation spec`) est appliqué automatiquement par le système de mise
+à jour de la base d'AzerothCore.
+
+## Choisir la spécialisation
+
+Par défaut, la rotation suit l'arbre de talents qui a le plus de points. Pour
+en imposer un autre (build hybride, personnage de bas niveau…) :
+
+- `.rotation spec balance` — un nom de spécialisation ou son préfixe unique
+  (`bal`), ou un numéro d'arbre `1`-`3` ;
+- `.rotation spec auto` — retour à la détection automatique ;
+- `.rotation spec` — affiche le choix actuel.
+
+Le choix est enregistré avec le personnage.
 
 ## Structure du code
 

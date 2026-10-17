@@ -8,7 +8,8 @@ the action bar. **1 press = 1 action** — each press casts the highest-priority
 ability currently available.
 
 **All 10 classes and 30 specializations** are covered. The specialization is
-detected automatically (dominant talent tree), rotations follow the Wowhead
+detected automatically (dominant talent tree) or chosen with `.rotation spec`
+(see below), rotations follow the Wowhead
 WotLK Classic guides, and the module resolves the **highest known rank** of
 every spell: it works at every level, not just 80.
 
@@ -120,7 +121,21 @@ Life Tap when mana < 20%; pet engaged; [AoE: Seed of Corruption]; then:
 3. (Optional) Customize `configs/modules/mod_rotation.conf`; reloadable
    in-game with `.reload config`.
 
-No SQL required.
+The only SQL file (`data/sql/db-world/base/mod_rotation_command.sql`, help
+text of `.rotation spec`) is applied automatically by the AzerothCore database
+updater.
+
+## Choosing the specialization
+
+By default the rotation follows the talent tree with the most points. To force
+another one (for example a hybrid build, or a low-level character):
+
+- `.rotation spec balance` — a spec name or its unique prefix (`bal`), or a
+  tree number `1`-`3`;
+- `.rotation spec auto` — back to automatic detection;
+- `.rotation spec` — shows the current choice.
+
+The choice is saved with the character.
 
 ## Code structure
 

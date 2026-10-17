@@ -44,6 +44,10 @@ namespace ModRotation
         bool Aoe() const { return enemies >= config.AoeThreshold; }
     };
 
+    // Talent tree chosen with .rotation spec, or the tree with the most
+    // points when the player chose automatic detection (RotationSpec.cpp).
+    uint8 ChosenTree(Player* p);
+
     // Helpers communs (définis dans Rotation.cpp)
     uint32 MaxRank(Player* p, uint32 firstRankId);
     bool   TryCast(Player* p, Unit* target, uint32 spellId);
