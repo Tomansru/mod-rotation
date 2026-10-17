@@ -325,7 +325,7 @@ static void ExecuteRotation(Player* p)
         c.enemies = CountEnemiesAround(p, c.target, config.AoeRadius);
     }
 
-    c.tree = p->GetMostPointsTalentTree();
+    c.tree = ChosenTree(p);
 
     switch (p->getClass())
     {
@@ -402,8 +402,11 @@ public:
     }
 };
 
+void AddRotationSpecScripts();
+
 void AddRotationScripts()
 {
+    AddRotationSpecScripts();
     new rotation_world_script();
     new rotation_player_script();
 }
