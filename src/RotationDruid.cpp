@@ -6,6 +6,8 @@
 
 #include "Rotation.h"
 #include "GameTime.h"
+#include "Creature.h"
+#include "Map.h"
 #include "SpellAuras.h"
 
 namespace ModRotation
@@ -23,6 +25,7 @@ namespace
     constexpr uint32 STARFIRE       = 2912;
     constexpr uint32 STARFALL       = 48505;
     constexpr uint32 HURRICANE      = 16914;
+    constexpr uint32 FORCE_OF_NATURE = 33831;
 
     constexpr uint32 MANGLE_CAT     = 33876;
     constexpr uint32 MANGLE_BEAR    = 33878;
@@ -46,11 +49,15 @@ namespace
 
     constexpr uint32 AURA_ECLIPSE_LUNAR = 48518; // Feu stellaire +40 % critique
     constexpr uint32 AURA_ECLIPSE_SOLAR = 48517; // Colère +40 % dégâts
+    constexpr uint32 AURA_BLOODLUST     = 2825;
+    constexpr uint32 AURA_HEROISM       = 32182;
 
     constexpr uint32 ECLIPSE_TALENT       = 48516;
     constexpr uint32 IMPROVED_FAERIE_FIRE = 33600;
     constexpr uint32 ECLIPSE_ICD_MS       = 30000;
     constexpr float  STARFALL_RADIUS      = 30.0f;
+    constexpr size_t DANGER_ATTACKERS     = 3;     // en solo : tréants de secours
+    constexpr float  DANGER_HEALTH_PCT    = 40.0f;
 
     // Le talent Eclipse a un temps de recharge interne de 30 s par type
     // d'Eclipse, gardé privé par le script du cœur (spell_dru_eclipse) : on le
@@ -88,9 +95,15 @@ namespace
     //    finit le plus tôt — Colère déclenche la lunaire, Feu stellaire la
     //    solaire. Après une lunaire on reste donc sur Feu stellaire jusqu'à
     //    la solaire, et inversement.
+    // Talent passif (aura permanente) appris, quel que soit son rang.
+    bool HasTalent(Player* me, uint32 firstRankId)
+    {
+        return me->GetAuraOfRankedSpell(firstRankId) != nullptr;
+    }
+
     uint32 PickNuke(Player* me)
     {
-        if (!me->GetAuraOfRankedSpell(ECLIPSE_TALENT) || !MaxRank(me, STARFIRE))
+        if (!HasTalent(me, ECLIPSE_TALENT) || !MaxRank(me, STARFIRE))
             return WRATH;
 
         if (me->HasAura(AURA_ECLIPSE_LUNAR))
@@ -107,75 +120,198 @@ namespace
         return solarIn < lunarIn ? STARFIRE : WRATH;
     }
 
-    void Balance(Ctx& c)
-    {
-        Player* me = c.me;
+    // --- Situations -------------------------------------------------------
 
-        // Forme de sélénien si connue
-        if (me->HasSpell(MOONKIN_FORM) && me->GetShapeshiftForm() != FORM_MOONKIN
-            && TryCast(me, me, MOONKIN_FORM))
+    // Jeu en groupe : en groupe, ou dans un donjon/raid (IsDungeon couvre
+    // les deux). Hors de ce cadre, la rotation est celle du jeu en solo.
+    bool InGroupContent(Player* me)
+    {
+        return me->GetGroup() || me->GetMap()->IsDungeon();
+    }
+
+    // Cible qui vit assez longtemps pour rentabiliser un GCD de préparation :
+    // élite, boss ou joueur.
+    bool IsToughTarget(Unit* target)
+    {
+        if (Creature* creature = target->ToCreature())
+            return creature->isElite() || creature->isWorldBoss() || creature->IsDungeonBoss();
+
+        return target->IsPlayer();
+    }
+
+    // Boss de donjon (flag du cœur) ou de rang « boss » (raids, boss du monde).
+    bool IsBoss(Unit* target)
+    {
+        Creature* creature = target->ToCreature();
+        return creature && (creature->IsDungeonBoss() || creature->isWorldBoss());
+    }
+
+    // Plusieurs ennemis sur le druide, ou il fond.
+    bool InDanger(Player* me)
+    {
+        return me->getAttackers().size() >= DANGER_ATTACKERS
+            || me->GetHealthPct() < DANGER_HEALTH_PCT;
+    }
+
+    bool HasBloodlust(Player* me)
+    {
+        return me->HasAura(AURA_BLOODLUST) || me->HasAura(AURA_HEROISM);
+    }
+
+    // --- Étapes -----------------------------------------------------------
+    // Chacune renvoie true si elle a lancé un sort : l'appui est consommé.
+
+    bool EnterMoonkinForm(Player* me)
+    {
+        return me->HasSpell(MOONKIN_FORM) && me->GetShapeshiftForm() != FORM_MOONKIN
+            && TryCast(me, me, MOONKIN_FORM);
+    }
+
+    // Mémorise les Eclipses en cours pour reconstituer leur recharge interne.
+    void TrackEclipses(Player* me)
+    {
+        if (!HasTalent(me, ECLIPSE_TALENT))
             return;
 
-        // Mémorise les Eclipses en cours, même sans cible.
-        if (me->GetAuraOfRankedSpell(ECLIPSE_TALENT))
+        EclipseState* state = me->CustomData.GetDefault<EclipseState>("mod_rotation_eclipse");
+        uint32 now = GameTime::GetGameTimeMS().count();
+        RecordEclipse(me, AURA_ECLIPSE_LUNAR, now, state->lunarProc, state->lunarSeen);
+        RecordEclipse(me, AURA_ECLIPSE_SOLAR, now, state->solarProc, state->solarSeen);
+    }
+
+    // Force de la nature : 3 tréants pendant 30 s, 3 min de recharge.
+    bool SummonTreants(Ctx& c)
+    {
+        return TryCastAt(c.me, c.target, FORCE_OF_NATURE);
+    }
+
+    // N'importe quelle Lucioles déjà posée (farouche, autre druide) suffit.
+    bool ApplyFaerieFire(Ctx& c)
+    {
+        return !c.target->GetAuraOfRankedSpell(FAERIE_FIRE)
+            && !c.target->GetAuraOfRankedSpell(FAERIE_FIRE_FERAL)
+            && TryCastRank(c.me, c.target, FAERIE_FIRE);
+    }
+
+    // Météores à chaque recharge, si la cible est à portée des étoiles et
+    // qu'aucun ennemi paisible alentour ne risque d'être pullé.
+    bool CastStarfall(Ctx& c)
+    {
+        return c.me->IsWithinDistInMap(c.target, STARFALL_RADIUS)
+            && !AnyIdleEnemyNear(c.me, STARFALL_RADIUS, c.target)
+            && TryCast(c.me, c.me, MaxRank(c.me, STARFALL));
+    }
+
+    // Ouragan à partir de 3 cibles.
+    bool CastHurricane(Ctx& c)
+    {
+        return c.enemies >= std::max<uint32>(config.AoeThreshold, 3)
+            && TryCastAt(c.me, c.target, HURRICANE);
+    }
+
+    // Essaim d'insectes entretenu, sauf pendant l'Eclipse lunaire : chaque
+    // GCD y va au Feu stellaire renforcé (pendant la solaire, on le garde).
+    bool KeepInsectSwarm(Ctx& c)
+    {
+        return !c.me->HasAura(AURA_ECLIPSE_LUNAR)
+            && KeepAuraOn(c.me, c.target, INSECT_SWARM);
+    }
+
+    // En mouvement, seuls les instantanés : DoTs entretenus, puis Feu lunaire
+    // en remplisseur.
+    void CastWhileMoving(Ctx& c)
+    {
+        if (KeepAuraOn(c.me, c.target, INSECT_SWARM)) return;
+        if (KeepAuraOn(c.me, c.target, MOONFIRE)) return;
+        TryCastRank(c.me, c.target, MOONFIRE);
+    }
+
+    // Colère ou Feu stellaire selon le cycle d'Eclipse, l'autre en repli
+    // (sort pas encore appris, etc.).
+    void CastNuke(Ctx& c)
+    {
+        uint32 nuke = PickNuke(c.me);
+        if (TryCastRank(c.me, c.target, nuke)) return;
+        TryCastRank(c.me, c.target, nuke == WRATH ? STARFIRE : WRATH);
+    }
+
+    // --- Scénarios --------------------------------------------------------
+
+    // Groupe, donjon, raid : la rotation des guides.
+    //  - Lucioles d'abord : l'armure profite à tous.
+    //  - Tréants gardés pour les boss : tout le menu fretin des donjons est
+    //    élite et les gaspillerait.
+    //  - Feu lunaire réservé au mouvement : les GCD rapportent plus en
+    //    Colère/Feu stellaire.
+    void BalanceGroup(Ctx& c)
+    {
+        bool boss = IsBoss(c.target);
+
+        // Sous Furie sanguinaire, l'attaque des tréants profite de la hâte.
+        if (boss && HasBloodlust(c.me) && SummonTreants(c)) return;
+        if (ApplyFaerieFire(c)) return;
+        if (CastStarfall(c)) return;
+        // Sinon dès la recharge : sur un boss, c'est le pull, là où la Furie
+        // sanguinaire est le plus souvent lancée.
+        if (boss && SummonTreants(c)) return;
+
+        if (c.me->isMoving())
         {
-            EclipseState* state = me->CustomData.GetDefault<EclipseState>("mod_rotation_eclipse");
-            uint32 now = GameTime::GetGameTimeMS().count();
-            RecordEclipse(me, AURA_ECLIPSE_LUNAR, now, state->lunarProc, state->lunarSeen);
-            RecordEclipse(me, AURA_ECLIPSE_SOLAR, now, state->solarProc, state->solarSeen);
+            CastWhileMoving(c);
+            return;
         }
+
+        if (CastHurricane(c)) return;
+        if (KeepInsectSwarm(c)) return;
+        // Sans le talent Eclipse (montée de niveau), Feu lunaire vaut son GCD.
+        if (!HasTalent(c.me, ECLIPSE_TALENT) && KeepAuraOn(c.me, c.target, MOONFIRE)) return;
+        CastNuke(c);
+    }
+
+    // Solo : pas de préparation sur le menu fretin.
+    //  - Lucioles et tréants seulement sur les cibles coriaces.
+    //  - Tréants de secours quand le druide est en danger : ils détournent
+    //    les ennemis.
+    //  - Feu lunaire entretenu.
+    void BalanceSolo(Ctx& c)
+    {
+        bool tough = IsToughTarget(c.target);
+
+        if (InDanger(c.me) && SummonTreants(c)) return;
+        if (tough && HasBloodlust(c.me) && SummonTreants(c)) return;
+        // Sans groupe, l'armure ne sert à personne : seul compte le +3 % de
+        // toucher/critique des sorts de Lucioles améliorées.
+        if (tough && HasTalent(c.me, IMPROVED_FAERIE_FIRE) && ApplyFaerieFire(c)) return;
+        if (CastStarfall(c)) return;
+        if (tough && SummonTreants(c)) return;
+
+        if (c.me->isMoving())
+        {
+            CastWhileMoving(c);
+            return;
+        }
+
+        if (CastHurricane(c)) return;
+        if (KeepInsectSwarm(c)) return;
+        if (KeepAuraOn(c.me, c.target, MOONFIRE)) return;
+        CastNuke(c);
+    }
+
+    void Balance(Ctx& c)
+    {
+        if (EnterMoonkinForm(c.me))
+            return;
+
+        // Même sans cible, pour ne manquer aucune Eclipse.
+        TrackEclipses(c.me);
 
         if (!c.target)
             return;
 
-        bool moving        = me->isMoving();
-        bool lunar         = me->HasAura(AURA_ECLIPSE_LUNAR);
-        bool eclipseTalent = me->GetAuraOfRankedSpell(ECLIPSE_TALENT) != nullptr;
-
-        // Lucioles : seulement si elles rapportent quelque chose au druide
-        // (Lucioles améliorées : +3 % de toucher/critique des sorts) ou au
-        // groupe (armure). N'importe quelle Lucioles déjà posée suffit.
-        if ((me->GetAuraOfRankedSpell(IMPROVED_FAERIE_FIRE) || me->GetGroup())
-            && !c.target->GetAuraOfRankedSpell(FAERIE_FIRE)
-            && !c.target->GetAuraOfRankedSpell(FAERIE_FIRE_FERAL)
-            && TryCastRank(me, c.target, FAERIE_FIRE))
-            return;
-
-        // Météores à chaque recharge, si la cible est à portée des étoiles et
-        // qu'aucun ennemi paisible alentour ne risque d'être pullé.
-        if (me->IsWithinDistInMap(c.target, STARFALL_RADIUS)
-            && !AnyIdleEnemyNear(me, STARFALL_RADIUS, c.target)
-            && TryCast(me, me, MaxRank(me, STARFALL)))
-            return;
-
-        // Ouragan à partir de 3 cibles (canalisé : impossible en mouvement)
-        if (!moving && c.enemies >= std::max<uint32>(config.AoeThreshold, 3)
-            && TryCastAt(me, c.target, HURRICANE))
-            return;
-
-        // Essaim d'insectes entretenu, sauf pendant l'Eclipse lunaire : chaque
-        // GCD y va au Feu stellaire renforcé (pendant la solaire, on le garde).
-        if ((!lunar || moving) && KeepAuraOn(me, c.target, INSECT_SWARM))
-            return;
-
-        // Feu lunaire : avec le talent Eclipse, les GCD rapportent plus en
-        // Colère/Feu stellaire, il est réservé au mouvement. Sans le talent
-        // (montée de niveau), il est entretenu.
-        if ((!eclipseTalent || moving) && KeepAuraOn(me, c.target, MOONFIRE))
-            return;
-
-        // En mouvement : Feu lunaire en remplisseur instantané
-        if (moving)
-        {
-            TryCastRank(me, c.target, MOONFIRE);
-            return;
-        }
-
-        uint32 nuke = PickNuke(me);
-        if (TryCastRank(me, c.target, nuke)) return;
-
-        // Repli (sort pas encore appris, etc.)
-        TryCastRank(me, c.target, nuke == WRATH ? STARFIRE : WRATH);
+        if (InGroupContent(c.me))
+            BalanceGroup(c);
+        else
+            BalanceSolo(c);
     }
 
     void FeralBear(Ctx& c)
