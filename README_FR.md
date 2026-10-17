@@ -47,7 +47,10 @@ Spell Editor de stoneharry…) et livrer le fichier dans un `patch-4.MPQ` /
 
 Conditions générales : les coûts (mana/rage/énergie/runes), recharges, GCD et
 portées sont vérifiés avant chaque cast — si une aptitude n'est pas disponible,
-la suivante de la liste est essayée. « AoE » = au moins `Rotation.AoE.Threshold`
+la suivante de la liste est essayée. Les sorts auxquels la cible est insensible
+sont aussi ignorés (même vérification que le « Insensible » du cœur), et un
+DoT/affaiblissement lancé 3 fois de suite sur la même cible sans jamais
+apparaître est ignoré sur cette cible pendant 30 secondes. « AoE » = au moins `Rotation.AoE.Threshold`
 ennemis en combat dans un rayon de `Rotation.AoE.Radius` mètres **autour de la
 cible actuelle** (défaut : 2 ennemis dans 10 mètres) — compter autour de la
 cible plutôt qu'autour de soi est ce qui rend l'AoE fonctionnelle pour les
@@ -102,7 +105,7 @@ Connexion automatique si mana < 20 % ; familier engagé ; [AoE : Graine de corru
 - **Destruction** : Immolation → Conflagration → Trait du chaos → Malédiction d'apocalypse → Incinérer
 
 ### Druide
-- **Equilibre** : Forme de sélénien → Lucioles → Essaim d'insectes → Feu lunaire → [AoE : Pluie d'étoiles, Ouragan] → Feu stellaire (Eclipse lunaire) / Colère
+- **Equilibre** : Forme de sélénien → Lucioles (seulement avec Lucioles améliorées ou en groupe, et si aucune Lucioles n'est déjà posée) → Météores à chaque recharge (cible à moins de 30 m et aucun ennemi paisible alentour à puller) → [3+ ennemis : Ouragan] → Essaim d'insectes (non rafraîchi pendant l'Eclipse lunaire) → Feu lunaire (entretenu seulement sans le talent Eclipse, c.-à-d. en montée de niveau ; avec, seulement en mouvement) → cycle d'Eclipse : Feu stellaire pendant l'Eclipse lunaire, Colère pendant l'Eclipse solaire ; hors Eclipse, on « pêche » celle dont la recharge interne de 30 s finit en premier (Colère déclenche la lunaire, Feu stellaire la solaire — après une lunaire on reste donc sur Feu stellaire jusqu'à la solaire, et inversement). En mouvement : DoT, puis Feu lunaire en remplisseur instantané.
 - **Farouche** : suit la forme actuelle. **Ours** (tank) : Mutiler → Lucioles (farouche) → Lacérer x5 → [AoE : Balayage] → Mutilation. **Félin** : Fureur du tigre (énergie basse) → Rugissement sauvage → Déchirure (5 pts) → Griffure → Mutiler → Lambeau (repli Mutiler/Griffe)
 - **Restauration** : Récupération / Croissance sauvage / Rétablissement / Prompte guérison / Nourrir selon la gravité
 

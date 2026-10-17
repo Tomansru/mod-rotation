@@ -11,12 +11,15 @@
 #include "Config.h"
 #include "CreatureAI.h"
 #include "Duration.h"
+#include "GameTime.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
 #include "ObjectAccessor.h"
 #include "Pet.h"
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
+
+#include <unordered_map>
 
 namespace ModRotation
 {
@@ -60,6 +63,11 @@ static bool ReadyToCast(Player* p, SpellInfo const* info)
     return CanPayCost(p, info);
 }
 
+static bool IsHostile(Player* p, Unit* target)
+{
+    return target != p && p->IsValidAttackTarget(target);
+}
+
 bool TryCast(Player* p, Unit* target, uint32 spellId)
 {
     if (!spellId || !target)
@@ -67,6 +75,12 @@ bool TryCast(Player* p, Unit* target, uint32 spellId)
 
     SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
     if (!ReadyToCast(p, info))
+        return false;
+
+    // Cible insensible (école, sort, mécanique…), selon la même vérification
+    // que le cœur au moment de l'impact : on passe au sort suivant au lieu de
+    // lancer un sort qui afficherait « Insensible ».
+    if (IsHostile(p, target) && target->IsImmunedToSpell(info, p))
         return false;
 
     return p->CastSpell(target, spellId, false) == SPELL_CAST_OK;
@@ -90,12 +104,100 @@ bool TryCastAt(Player* p, Unit* where, uint32 firstRankId)
     return p->CastSpell(where->GetPositionX(), where->GetPositionY(), where->GetPositionZ(), id, false) == SPELL_CAST_OK;
 }
 
+namespace
+{
+    // Poses successives d'une aura restées sans effet avant de l'ignorer, et
+    // durée pendant laquelle elle est ignorée sur cette cible.
+    constexpr uint8  AURA_MAX_FAILED = 3;
+    constexpr uint32 AURA_BLOCK_MS   = 30000;
+
+    // Auras (DoT…) lancées sur la cible hostile courante sans être apparues :
+    // filet de sécurité pour les insensibilités que le cœur ne déclare pas à
+    // l'avance (scripts, évitement…).
+    struct AuraFailures : public DataMap::Base
+    {
+        struct Entry
+        {
+            uint8  failed       = 0;
+            uint32 blockedUntil = 0; // GameTime en ms, 0 = non bloquée
+        };
+
+        ObjectGuid target;
+        std::unordered_map<uint32, Entry> spells; // par premier rang
+    };
+
+    AuraFailures* GetAuraFailures(Player* p, Unit* target)
+    {
+        AuraFailures* failures = p->CustomData.GetDefault<AuraFailures>("mod_rotation_aura_failures");
+        if (failures->target != target->GetGUID())
+        {
+            failures->target = target->GetGUID();
+            failures->spells.clear();
+        }
+        return failures;
+    }
+
+    // Insensible à tous les effets d'aura du sort (ex. dégâts périodiques) :
+    // le sort toucherait sans jamais poser le DoT.
+    bool IsImmuneToAuras(Unit* target, SpellInfo const* info, Player* p)
+    {
+        bool hasAura = false;
+        for (uint8 i = EFFECT_0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (!info->Effects[i].IsAura())
+                continue;
+
+            hasAura = true;
+            if (!target->IsImmunedToSpellEffect(info, i, p))
+                return false;
+        }
+        return hasAura;
+    }
+}
+
 bool KeepAuraOn(Player* p, Unit* target, uint32 firstRankId)
 {
-    if (!target || target->GetAuraOfRankedSpell(firstRankId, p->GetGUID()))
+    if (!target)
         return false;
 
-    return TryCastRank(p, target, firstRankId);
+    AuraFailures* failures = IsHostile(p, target) ? GetAuraFailures(p, target) : nullptr;
+
+    if (target->GetAuraOfRankedSpell(firstRankId, p->GetGUID()))
+    {
+        if (failures)
+            failures->spells.erase(firstRankId);
+        return false;
+    }
+
+    uint32 id = MaxRank(p, firstRankId);
+    if (!id)
+        return false;
+
+    if (failures)
+    {
+        if (IsImmuneToAuras(target, sSpellMgr->GetSpellInfo(id), p))
+            return false;
+
+        AuraFailures::Entry& entry = failures->spells[firstRankId];
+        uint32 now = GameTime::GetGameTimeMS().count();
+        if (entry.blockedUntil)
+        {
+            if (int32(entry.blockedUntil - now) > 0)
+                return false;
+
+            entry = AuraFailures::Entry(); // délai écoulé : on retente
+        }
+
+        if (!TryCast(p, target, id))
+            return false;
+
+        if (++entry.failed >= AURA_MAX_FAILED)
+            entry.blockedUntil = now + AURA_BLOCK_MS;
+
+        return true;
+    }
+
+    return TryCast(p, target, id);
 }
 
 bool KeepSelfBuff(Player* p, uint32 firstRankId)
@@ -140,6 +242,22 @@ void EngageRanged(Ctx& c)
     // Tir automatique (75) pour les chasseurs
     if (c.me->getClass() == CLASS_HUNTER && !c.me->GetCurrentSpell(CURRENT_AUTOREPEAT_SPELL))
         c.me->CastSpell(c.target, 75, false);
+}
+
+bool AnyIdleEnemyNear(Player* p, float radius, Unit* except)
+{
+    typedef Acore::UnitListSearcher<Acore::AnyUnfriendlyUnitInObjectRangeCheck> Searcher;
+
+    std::list<Unit*> units;
+    Acore::AnyUnfriendlyUnitInObjectRangeCheck check(p, p, radius);
+    Searcher searcher(p, units, check);
+    Cell::VisitObjects(p, searcher, radius);
+
+    for (Unit* u : units)
+        if (u != except && !u->IsInCombat() && p->IsValidAttackTarget(u))
+            return true;
+
+    return false;
 }
 
 // Compte les ennemis en combat autour de la cible. C'est ce qui décide de
