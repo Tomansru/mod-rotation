@@ -128,8 +128,9 @@ namespace
         if (!c.target)
             return;
 
-        bool moving    = me->isMoving();
-        bool inEclipse = me->HasAura(AURA_ECLIPSE_LUNAR) || me->HasAura(AURA_ECLIPSE_SOLAR);
+        bool moving        = me->isMoving();
+        bool lunar         = me->HasAura(AURA_ECLIPSE_LUNAR);
+        bool eclipseTalent = me->GetAuraOfRankedSpell(ECLIPSE_TALENT) != nullptr;
 
         // Lucioles : seulement si elles rapportent quelque chose au druide
         // (Lucioles améliorées : +3 % de toucher/critique des sorts) ou au
@@ -152,14 +153,16 @@ namespace
             && TryCastAt(me, c.target, HURRICANE))
             return;
 
-        // DoT : on ne les rafraîchit pas pendant une Eclipse (chaque GCD doit
-        // profiter du bonus), sauf en mouvement où ce sont les seuls sorts
-        // instantanés disponibles.
-        if (!inEclipse || moving)
-        {
-            if (KeepAuraOn(me, c.target, INSECT_SWARM)) return;
-            if (KeepAuraOn(me, c.target, MOONFIRE)) return;
-        }
+        // Essaim d'insectes entretenu, sauf pendant l'Eclipse lunaire : chaque
+        // GCD y va au Feu stellaire renforcé (pendant la solaire, on le garde).
+        if ((!lunar || moving) && KeepAuraOn(me, c.target, INSECT_SWARM))
+            return;
+
+        // Feu lunaire : avec le talent Eclipse, les GCD rapportent plus en
+        // Colère/Feu stellaire, il est réservé au mouvement. Sans le talent
+        // (montée de niveau), il est entretenu.
+        if ((!eclipseTalent || moving) && KeepAuraOn(me, c.target, MOONFIRE))
+            return;
 
         // En mouvement : Feu lunaire en remplisseur instantané
         if (moving)
